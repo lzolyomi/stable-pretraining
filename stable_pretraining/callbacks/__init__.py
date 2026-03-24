@@ -22,6 +22,7 @@ from .env_info import EnvironmentDumpCallback
 from .cpu_offload import CPUOffloadCallback
 from .registry import ModuleRegistryCallback
 from .unused_parameters import LogUnusedParametersOnce
+from .step_timer import StepTimer
 
 __all__ = [
     OnlineProbe,
@@ -49,4 +50,5 @@ __all__ = [
     EnvironmentDumpCallback,
     ModuleRegistryCallback,
     LogUnusedParametersOnce,
+    StepTimer,
 ]

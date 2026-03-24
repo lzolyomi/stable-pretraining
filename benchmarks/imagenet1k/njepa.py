@@ -283,6 +283,7 @@ trainer = pl.Trainer(
     num_sanity_val_steps=0,
     callbacks=[
         TeacherStudentCallback(),
+        spt.callbacks.StepTimer(),
         linear_probe,
         knn_probe,
         pl.pytorch.callbacks.ModelCheckpoint(
