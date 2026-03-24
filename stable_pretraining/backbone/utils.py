@@ -1554,3 +1554,106 @@ class EfficientMaskedTimmViT(nn.Module):
             pos_embed = patch_pos_embed
 
         return pos_embed
+
+
+class NoisingTeacherStudentWrapper(TeacherStudentWrapper):
+    """TeacherStudentWrapper with a 3-phase noising schedule for target encoder updates.
+
+    Instead of always applying standard EMA, the update rule cycles through three phases
+    based on a global optimizer-step counter:
+
+    - **Phase 1** (``step <= phase1_end``): Push target toward scale-invariant noise.
+      ``param_k = m * param_k + (1-m) * randn_like(param_k) * (rms(param_k) * noise_scale)``
+    - **Phase 2** (``phase1_end < step <= phase2_end``): EMA toward student + tiny noise.
+      ``param_k = m * param_k + (1-m) * (param_q + randn_like(param_k) * (rms(param_k) * noise_floor_scale))``
+    - **Phase 3** (``step > phase2_end``): Standard EMA.
+      ``param_k = m * param_k + (1-m) * param_q``
+
+    Setting ``phase1_end=0`` and ``phase2_end=0`` disables both noising phases and
+    recovers vanilla EMA (identical to :class:`TeacherStudentWrapper`).
+
+    Buffers (BN running stats, etc.) always follow standard EMA regardless of phase.
+
+    The ``global_step`` counter is a registered buffer and is saved/restored with
+    Lightning checkpoints automatically. Use :class:`TeacherStudentCallback` as-is —
+    it detects this wrapper via duck-typing.
+
+    :param student: The student model.
+    :param phase1_end: Last step of Phase 1 (noise-only). 0 disables Phase 1.
+    :param phase2_end: Last step of Phase 2 (EMA + noise). Must be >= phase1_end.
+    :param noise_scale: Noise amplitude relative to RMS of each parameter in Phase 1.
+    :param noise_floor_scale: Noise amplitude relative to RMS in Phase 2.
+    :param warm_init: Initialise teacher = student before training.
+    :param base_ema_coefficient: Starting EMA decay (cosine schedule).
+    :param final_ema_coefficient: Ending EMA decay (cosine schedule).
+    """
+
+    def __init__(
+        self,
+        student: torch.nn.Module,
+        phase1_end: int = 1000,
+        phase2_end: int = 10000,
+        noise_scale: float = 0.05,
+        noise_floor_scale: float = 0.02,
+        warm_init: bool = True,
+        base_ema_coefficient: float = 0.996,
+        final_ema_coefficient: float = 1.0,
+    ):
+        # Pass warm_init=False so the parent does NOT call our overridden
+        # update_teacher() before global_step is registered as a buffer.
+        super().__init__(
+            student,
+            warm_init=False,
+            base_ema_coefficient=base_ema_coefficient,
+            final_ema_coefficient=final_ema_coefficient,
+        )
+        self.phase1_end = phase1_end
+        self.phase2_end = phase2_end
+        self.noise_scale = noise_scale
+        self.noise_floor_scale = noise_floor_scale
+        self.register_buffer("global_step", torch.zeros((), dtype=torch.long))
+
+        # Replicate warm_init: copy all student params/buffers into teacher.
+        if warm_init:
+            with torch.no_grad():
+                for t, s in zip(self.teacher.parameters(), self.student.parameters()):
+                    t.data.copy_(s.data)
+                for t, s in zip(self.teacher.buffers(), self.student.buffers()):
+                    t.data.copy_(s.data)
+
+    @torch.no_grad()
+    def update_teacher(self):
+        """Update teacher via the 3-phase noising schedule.
+
+        Increments ``global_step`` by 1 each call, then applies the appropriate
+        per-parameter update for the current phase.
+        """
+        if not self.training:
+            return
+
+        self.global_step += 1
+        t = int(self.global_step.item())
+        m = float(self.ema_coefficient.item())
+
+        for param_q, param_k in zip(
+            self.student.parameters(), self.teacher.parameters()
+        ):
+            rms = param_k.data.pow(2).mean().sqrt().clamp_(1e-6, 1e3)
+
+            if self.phase1_end > 0 and t <= self.phase1_end:
+                # Phase 1: EMA toward scale-invariant noise
+                target = torch.randn_like(param_k.data) * (rms * self.noise_scale)
+            elif self.phase2_end > self.phase1_end and t <= self.phase2_end:
+                # Phase 2: EMA toward student + small noise
+                eps = torch.randn_like(param_k.data) * (rms * self.noise_floor_scale)
+                target = param_q.detach().data + eps
+            else:
+                # Phase 3: standard EMA
+                target = param_q.detach().data
+
+            param_k.data.mul_(m).add_((1.0 - m) * target)
+
+        # Buffers (e.g. BN running stats): always standard EMA
+        for buf_q, buf_k in zip(self.student.buffers(), self.teacher.buffers()):
+            if buf_q.dtype.is_floating_point:
+                buf_k.data.mul_(m).add_((1.0 - m) * buf_q.data)
