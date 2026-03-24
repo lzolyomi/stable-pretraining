@@ -25,8 +25,8 @@ Environment variables:
     NJEPA_NOISE_FLOOR_SCALE     Phase-2 noise amplitude relative to param RMS (default: 0.02)
     NJEPA_EMA_START             Initial EMA decay (default: 0.996)
     NJEPA_EMA_END               Final EMA decay (default: 1.0)
-    NJEPA_EFFECTIVE_BATCH_SIZE  Total batch size across all GPUs (default: 2048)
-    NJEPA_MAX_BATCH_SIZE        Max per-GPU batch size (default: 128)
+    NJEPA_BATCH_SIZE            Per-device batch size (default: 256)
+    NJEPA_LR                    Base learning rate (default: 5e-4)
     NJEPA_EPOCHS                Training epochs (default: 300)
     NJEPA_NUM_WORKERS           DataLoader workers (default: 16)
     NJEPA_PRECISION             Lightning precision (default: 16-mixed)
@@ -80,27 +80,6 @@ PREDICTOR_DEFAULTS = {
 }
 
 
-def resolve_batch_config(target_effective_batch_size, max_batch_size_per_device, num_gpus):
-    if target_effective_batch_size < 1:
-        raise ValueError("NJEPA_EFFECTIVE_BATCH_SIZE must be positive.")
-    if max_batch_size_per_device < 1:
-        raise ValueError("NJEPA_MAX_BATCH_SIZE must be positive.")
-
-    upper = min(max_batch_size_per_device, target_effective_batch_size)
-    for batch_size in range(upper, 0, -1):
-        per_step_batch_size = batch_size * num_gpus
-        if target_effective_batch_size % per_step_batch_size == 0:
-            accumulate_grad_batches = target_effective_batch_size // per_step_batch_size
-            return batch_size, accumulate_grad_batches
-
-    raise ValueError(
-        "Could not match the requested effective batch size exactly. "
-        f"GPU count={num_gpus}, target={target_effective_batch_size}, "
-        f"max_per_device={max_batch_size_per_device}. "
-        "Adjust NJEPA_MAX_BATCH_SIZE or the GPU count."
-    )
-
-
 def build_hf_dataset(split, cache_dir, transform):
     kwargs = {
         "path": "ILSVRC/imagenet-1k",
@@ -139,13 +118,9 @@ noise_floor_scale = float(os.environ.get("NJEPA_NOISE_FLOOR_SCALE", "0.02"))
 ema_start = float(os.environ.get("NJEPA_EMA_START", "0.996"))
 ema_end = float(os.environ.get("NJEPA_EMA_END", "1.0"))
 
-num_gpus = torch.cuda.device_count() or 1
-effective_batch_size = int(os.environ.get("NJEPA_EFFECTIVE_BATCH_SIZE", "2048"))
-max_batch_size_per_device = int(os.environ.get("NJEPA_MAX_BATCH_SIZE", "128"))
-batch_size, accumulate_grad_batches = resolve_batch_config(
-    effective_batch_size, max_batch_size_per_device, num_gpus
-)
-scaled_lr = 5e-4 * (effective_batch_size / 2048)
+batch_size = int(os.environ.get("NJEPA_BATCH_SIZE", "256"))
+lr = float(os.environ.get("NJEPA_LR", "5e-4"))
+num_nodes = int(os.environ.get("SLURM_NNODES", 1))
 
 num_workers = int(os.environ.get("NJEPA_NUM_WORKERS", "16"))
 max_epochs = int(os.environ.get("NJEPA_EPOCHS", "300"))
@@ -167,10 +142,9 @@ print(
         "noise_floor_scale": noise_floor_scale,
         "ema_start": ema_start,
         "ema_end": ema_end,
-        "num_gpus": num_gpus,
         "batch_size_per_device": batch_size,
-        "accumulate_grad_batches": accumulate_grad_batches,
-        "effective_batch_size": effective_batch_size,
+        "num_nodes": num_nodes,
+        "lr": lr,
         "max_epochs": max_epochs,
     },
 )
@@ -248,7 +222,7 @@ module.optim = {
         "modules": "encoder.student|predictor",
         "optimizer": {
             "type": "AdamW",
-            "lr": scaled_lr,
+            "lr": lr,
             "weight_decay": 0.05,
             "betas": (0.9, 0.95),
         },
@@ -322,10 +296,10 @@ trainer = pl.Trainer(
     ],
     precision=precision,
     logger=wandb_logger,
-    devices=num_gpus,
+    devices="auto",
+    num_nodes=num_nodes,
     accelerator="gpu",
-    strategy="ddp_find_unused_parameters_true" if num_gpus > 1 else "auto",
-    accumulate_grad_batches=accumulate_grad_batches,
+    strategy="ddp_find_unused_parameters_true",
 )
 
 manager = spt.Manager(trainer=trainer, module=module, data=data)
