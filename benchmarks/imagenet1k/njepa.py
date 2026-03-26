@@ -40,8 +40,8 @@ Environment variables:
 """
 
 import os
-import time
 import types
+from datetime import datetime
 from pathlib import Path
 
 import lightning as pl
@@ -264,14 +264,16 @@ knn_probe = spt.callbacks.OnlineKNN(
     k=20,
 )
 
-ckpt_dir = Path(__file__).parent / "checkpoints" / f"njepa-{short_name}"
+_dt_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+run_name = os.environ.get("NJEPA_RUN_NAME", f"njepa-{short_name}-{_dt_suffix}")
+ckpt_dir = Path(__file__).parent / "checkpoints" / run_name
 
 wandb_logger = False
 if os.environ.get("NJEPA_USE_WANDB", "1") == "1":
     wandb_logger = WandbLogger(
         entity=os.environ.get("WANDB_ENTITY"),
         project=os.environ.get("WANDB_PROJECT", "stable-pretraining"),
-        name=f"njepa-{short_name}-{time.time():.0f}",
+        name=run_name,
         log_model=False,
     )
 
@@ -281,6 +283,7 @@ if os.environ.get("NJEPA_USE_WANDB", "1") == "1":
 trainer = pl.Trainer(
     max_epochs=max_epochs,
     num_sanity_val_steps=0,
+    check_val_every_n_epoch=5,
     callbacks=[
         TeacherStudentCallback(),
         spt.callbacks.StepTimer(),
@@ -288,10 +291,11 @@ trainer = pl.Trainer(
         knn_probe,
         pl.pytorch.callbacks.ModelCheckpoint(
             dirpath=str(ckpt_dir),
-            filename=f"njepa-{short_name}-{{epoch:03d}}",
+            filename=f"{run_name}-{{epoch:03d}}",
             save_top_k=-1,
             every_n_epochs=ckpt_every,
             save_last=True,
+            save_on_train_epoch_end=True,
         ),
         pl.pytorch.callbacks.LearningRateMonitor(logging_interval="step"),
     ],
