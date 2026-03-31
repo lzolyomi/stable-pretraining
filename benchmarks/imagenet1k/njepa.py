@@ -265,7 +265,8 @@ knn_probe = spt.callbacks.OnlineKNN(
 )
 
 _dt_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_name = os.environ.get("NJEPA_RUN_NAME", f"njepa-{short_name}-{_dt_suffix}")
+predefined_run_name = os.environ.get("NJEPA_RUN_NAME", "njepa")
+run_name = f"{predefined_run_name}-{short_name}-{_dt_suffix}"
 ckpt_dir = Path(__file__).parent / "checkpoints" / run_name
 
 wandb_logger = False
