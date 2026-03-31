@@ -276,6 +276,22 @@ if os.environ.get("NJEPA_USE_WANDB", "1") == "1":
         name=run_name,
         log_model=False,
     )
+    wandb_logger.log_hyperparams({
+        "encoder": encoder_name,
+        "predictor_embed_dim": predictor_embed_dim,
+        "predictor_depth": predictor_depth,
+        "phase1_end": phase1_end,
+        "phase2_end": phase2_end,
+        "noise_scale": noise_scale,
+        "noise_floor_scale": noise_floor_scale,
+        "ema_start": ema_start,
+        "ema_end": ema_end,
+        "batch_size_per_device": batch_size,
+        "num_nodes": num_nodes,
+        "lr": lr,
+        "max_epochs": max_epochs,
+        "precision": precision,
+    })
 
 # ---------------------------------------------------------------------------
 # Trainer
