@@ -1,6 +1,38 @@
+"""SALT Stage 2 (student-teacher JEPA pretraining) on ImageNet-1K with ViT-Base.
+
+Loads a Stage 1 MAE checkpoint as the teacher and trains a student encoder
+with a cross-attention predictor using masked patch prediction.
+
+Usage (with teacher checkpoint):
+    SALT_TEACHER_CKPT=path/to/stage1.ckpt python benchmarks/imagenet1k/salt-stage2-vit-base.py
+
+Usage (no teacher, random init):
+    python benchmarks/imagenet1k/salt-stage2-vit-base.py
+
+Environment variables:
+    SALT_TEACHER_CKPT                   Path to Stage 1 checkpoint (optional; random init if unset)
+    SALT_BATCH_SIZE                     Per-device batch size (default: 256)
+    SALT_LR                             Learning rate (default: 5e-4)
+    SALT_NUM_WORKERS                    DataLoader workers (default: 16)
+    SALT_PREDICTOR_EMBED_DIM            Predictor hidden dim (default: 384)
+    SALT_PREDICTOR_DEPTH                Predictor depth (default: 12)
+    SALT_PREDICTOR_NUM_HEADS            Predictor attention heads (default: 16)
+    SALT_NUM_TARGETS                    Number of masking targets (default: 4)
+    SALT_STAGE2_EPOCHS                  Training epochs (default: 400)
+    SALT_STAGE2_RUN_NAME                Base name for the run (default: salt-stage2-vitb)
+    SALT_STAGE2_CKPT_EVERY              Save checkpoint every N epochs (default: 50)
+    SALT_PRECISION                      Lightning precision (default: 16-mixed)
+    SALT_USE_WANDB                      Set to "1" to enable W&B logging (default: 1)
+    HF_IN1K_CACHE_DIR                   ImageNet-1K HuggingFace cache dir
+    HF_TOKEN                            HuggingFace access token
+    HF_DATASET_REVISION                 Optional dataset revision pin
+    WANDB_ENTITY                        W&B entity
+    WANDB_PROJECT                       W&B project (default: stable-pretraining)
+"""
+
 import os
-import time
 import types
+from datetime import datetime
 from pathlib import Path
 
 import lightning as pl
@@ -12,27 +44,6 @@ from torch import nn
 import stable_pretraining as spt
 from stable_pretraining.data import transforms
 from stable_pretraining.methods.salt import SALT
-
-
-def resolve_batch_config(target_effective_batch_size, max_batch_size_per_device, num_gpus):
-    if target_effective_batch_size < 1:
-        raise ValueError("SALT_EFFECTIVE_BATCH_SIZE must be positive.")
-    if max_batch_size_per_device < 1:
-        raise ValueError("SALT_MAX_BATCH_SIZE_PER_DEVICE must be positive.")
-
-    upper = min(max_batch_size_per_device, target_effective_batch_size)
-    for batch_size in range(upper, 0, -1):
-        per_step_batch_size = batch_size * num_gpus
-        if target_effective_batch_size % per_step_batch_size == 0:
-            accumulate_grad_batches = target_effective_batch_size // per_step_batch_size
-            return batch_size, accumulate_grad_batches
-
-    raise ValueError(
-        "Could not match the requested effective batch size exactly. "
-        f"GPU count={num_gpus}, target={target_effective_batch_size}, "
-        f"max_per_device={max_batch_size_per_device}. "
-        "Adjust SALT_MAX_BATCH_SIZE_PER_DEVICE or the GPU count."
-    )
 
 
 def build_hf_dataset(split, cache_dir, transform):
@@ -69,14 +80,8 @@ data_dir = Path(
 data_dir.mkdir(parents=True, exist_ok=True)
 
 num_gpus = torch.cuda.device_count() or 1
-effective_batch_size = int(os.environ.get("SALT_EFFECTIVE_BATCH_SIZE", "2048"))
-max_batch_size_per_device = int(os.environ.get("SALT_MAX_BATCH_SIZE_PER_DEVICE", "128"))
-batch_size, accumulate_grad_batches = resolve_batch_config(
-    effective_batch_size,
-    max_batch_size_per_device,
-    num_gpus,
-)
-scaled_lr = 5e-4 * (effective_batch_size / 2048)
+batch_size = int(os.environ.get("SALT_BATCH_SIZE", "256"))
+lr = float(os.environ.get("SALT_LR", "5e-4"))
 num_workers = int(os.environ.get("SALT_NUM_WORKERS", "16"))
 
 print(
@@ -85,8 +90,7 @@ print(
         "cache_dir": str(data_dir),
         "num_gpus": num_gpus,
         "batch_size_per_device": batch_size,
-        "accumulate_grad_batches": accumulate_grad_batches,
-        "effective_batch_size": effective_batch_size,
+        "lr": lr,
         "teacher_ckpt": os.environ.get("SALT_TEACHER_CKPT"),
     },
 )
@@ -151,7 +155,7 @@ module.optim = {
         "modules": "student|predictor",
         "optimizer": {
             "type": "AdamW",
-            "lr": scaled_lr,
+            "lr": lr,
             "weight_decay": 0.05,
             "betas": (0.9, 0.95),
         },
@@ -190,12 +194,17 @@ knn_probe = spt.callbacks.OnlineKNN(
     k=20,
 )
 
+_dt_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+predefined_run_name = os.environ.get("SALT_STAGE2_RUN_NAME", "salt-stage2")
+run_name = f"{predefined_run_name}-vitb-{_dt_suffix}"
+ckpt_dir = Path(__file__).parent / "checkpoints" / run_name
+
 wandb_logger = False
 if os.environ.get("SALT_USE_WANDB", "1") == "1":
     wandb_logger = WandbLogger(
         entity=os.environ.get("WANDB_ENTITY"),
-        project=os.environ.get("WANDB_PROJECT", "levi-temp"),
-        name=f"salt-stage2-vit-base-{time.time()}",
+        project=os.environ.get("WANDB_PROJECT", "stable-pretraining"),
+        name=run_name,
         log_model=False,
     )
 
@@ -206,8 +215,8 @@ trainer = pl.Trainer(
         linear_probe,
         knn_probe,
         pl.pytorch.callbacks.ModelCheckpoint(
-            dirpath=str(Path(__file__).parent / "checkpoints" / "salt-stage2-vitb"),
-            filename="salt-stage2-vitb-{epoch:03d}",
+            dirpath=str(ckpt_dir),
+            filename=f"{run_name}-{{epoch:03d}}",
             save_top_k=-1,
             every_n_epochs=int(os.environ.get("SALT_STAGE2_CKPT_EVERY", "50")),
             save_last=True,
@@ -219,7 +228,6 @@ trainer = pl.Trainer(
     devices=num_gpus,
     accelerator="gpu",
     strategy="ddp_find_unused_parameters_true" if num_gpus > 1 else "auto",
-    accumulate_grad_batches=accumulate_grad_batches,
 )
 
 manager = spt.Manager(trainer=trainer, module=module, data=data)
