@@ -1,4 +1,4 @@
-import sys
+import os
 import types
 from pathlib import Path
 
@@ -13,10 +13,11 @@ from stable_pretraining.methods.ijepa import IJEPA
 
 
 def main():
-    sys.path.append(str(Path(__file__).parent.parent))
-    from utils import get_data_dir
-
+    seed = int(os.environ.get("IJEPA_SEED", "42"))
+    data_dir = Path(os.environ.get("HF_IN100_CACHE_DIR", "/nfs-gpu/users_home/levizolyomi/hf-in100"))
+    data_dir.mkdir(parents=True, exist_ok=True)
     num_gpus = torch.cuda.device_count() or 1
+    num_nodes = int(os.environ.get("SLURM_NNODES", 1))
     batch_size = 256
     scaled_lr = 5e-4 * (batch_size * num_gpus / 2048)
 
@@ -41,7 +42,7 @@ def main():
             dataset=spt.data.HFDataset(
                 "clane9/imagenet-100",
                 split="train",
-                cache_dir=str(get_data_dir("imagenet100")),
+                cache_dir=str(data_dir),
                 transform=transforms.Compose(
                     transforms.RGB(),
                     transforms.RandomResizedCrop((224, 224), scale=(0.3, 1.0)),
@@ -58,7 +59,7 @@ def main():
             dataset=spt.data.HFDataset(
                 "clane9/imagenet-100",
                 split="validation",
-                cache_dir=str(get_data_dir("imagenet100")),
+                cache_dir=str(data_dir),
                 transform=transforms.Compose(
                     transforms.RGB(),
                     transforms.Resize((256, 256)),
@@ -147,18 +148,19 @@ def main():
             pl.pytorch.callbacks.LearningRateMonitor(logging_interval="step"),
         ],
         logger=pl.pytorch.loggers.WandbLogger(
-            entity="stable-ssl",
-            project="imagenet100-mae-ijepa",
+            entity="tirex",
+            project="stable-pretraining",
             name="ijepa-vitb-inet100",
             log_model=False,
         ),
         precision="16-mixed",
-        devices=num_gpus,
+        devices="auto",
+        num_nodes=num_nodes,
         accelerator="gpu",
-        strategy="ddp_find_unused_parameters_true" if num_gpus > 1 else "auto",
+        strategy="ddp_find_unused_parameters_true",
     )
 
-    manager = spt.Manager(trainer=trainer, module=module, data=data)
+    manager = spt.Manager(trainer=trainer, module=module, data=data, seed=seed)
     manager()
 
 
