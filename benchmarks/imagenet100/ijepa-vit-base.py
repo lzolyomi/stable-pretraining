@@ -24,9 +24,6 @@ def main():
     def ijepa_forward(self, batch, stage):
         output = IJEPA.forward(self, batch["image"])
         embedding = output.embedding.mean(dim=1)
-        if self.training:
-            embedding = embedding.detach()
-
         self.log(
             f"{stage}/loss", output.loss, on_step=True, on_epoch=True, sync_dist=True
         )
@@ -45,7 +42,8 @@ def main():
                 cache_dir=str(data_dir),
                 transform=transforms.Compose(
                     transforms.RGB(),
-                    transforms.RandomResizedCrop((224, 224), scale=(0.3, 1.0)),
+                    transforms.RandomResizedCrop((224, 224), scale=(0.4, 1.0)),
+                    transforms.RandomHorizontalFlip(p=0.5),
                     transforms.ToImage(**spt.data.static.ImageNet),
                 ),
             ),
@@ -76,7 +74,7 @@ def main():
     module = IJEPA(
         encoder_name="vit_base_patch16_224",
         predictor_embed_dim=384,
-        predictor_depth=12,
+        predictor_depth=6,
         num_targets=4,
         target_scale=(0.15, 0.2),
         target_aspect_ratio=(0.75, 1.5),
