@@ -22,6 +22,7 @@ Environment variables:
     IJEPA_NUM_WORKERS               DataLoader workers (default: 16)
     IJEPA_PRECISION                 Lightning precision (default: 16-mixed)
     IJEPA_CKPT_EVERY                Save checkpoint every N epochs (default: 50)
+    IJEPA_SEED                      Random seed for reproducibility (default: 42)
     IJEPA_RUN_NAME                  Base name for the run (default: ijepa)
     IJEPA_USE_WANDB                 Set to "1" to enable W&B logging (default: 1)
     HF_IN1K_CACHE_DIR               ImageNet-1K HuggingFace cache dir
@@ -76,6 +77,7 @@ num_workers = int(os.environ.get("IJEPA_NUM_WORKERS", "16"))
 max_epochs = int(os.environ.get("IJEPA_EPOCHS", "300"))
 precision = os.environ.get("IJEPA_PRECISION", "16-mixed")
 ckpt_every = int(os.environ.get("IJEPA_CKPT_EVERY", "50"))
+seed = int(os.environ.get("IJEPA_SEED", "42"))
 
 data_dir = Path(os.environ.get("HF_IN1K_CACHE_DIR", "/nfs-gpu/users_home/levizolyomi/hf-in1k"))
 data_dir.mkdir(parents=True, exist_ok=True)
@@ -287,5 +289,5 @@ trainer = pl.Trainer(
     strategy="ddp_find_unused_parameters_true",
 )
 
-manager = spt.Manager(trainer=trainer, module=module, data=data)
+manager = spt.Manager(trainer=trainer, module=module, data=data, seed=seed)
 manager()

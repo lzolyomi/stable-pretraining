@@ -17,6 +17,7 @@ Environment variables:
     SALT_STAGE1_EPOCHS                  Training epochs (default: 100)
     SALT_STAGE1_RUN_NAME                Base name for the run (default: salt-stage1-vitb)
     SALT_STAGE1_CKPT_EVERY              Save checkpoint every N epochs (default: 25)
+    SALT_SEED                           Random seed for reproducibility (default: 42)
     SALT_PRECISION                      Lightning precision (default: 16-mixed)
     SALT_USE_WANDB                      Set to "1" to enable W&B logging (default: 1)
     HF_IN1K_CACHE_DIR                   ImageNet-1K HuggingFace cache dir
@@ -80,6 +81,7 @@ num_gpus = torch.cuda.device_count() or 1
 batch_size = int(os.environ.get("SALT_BATCH_SIZE", "256"))
 lr = float(os.environ.get("SALT_LR", "5e-4"))
 num_workers = int(os.environ.get("SALT_NUM_WORKERS", "16"))
+seed = int(os.environ.get("SALT_SEED", "42"))
 
 print(
     "Stage 1 config:",
@@ -216,5 +218,5 @@ trainer = pl.Trainer(
     strategy="ddp_find_unused_parameters_true" if num_gpus > 1 else "auto",
 )
 
-manager = spt.Manager(trainer=trainer, module=module, data=data)
+manager = spt.Manager(trainer=trainer, module=module, data=data, seed=seed)
 manager()
