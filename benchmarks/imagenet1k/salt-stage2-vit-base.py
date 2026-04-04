@@ -24,6 +24,7 @@ Environment variables:
     SALT_SEED                           Random seed for reproducibility (default: 42)
     SALT_PRECISION                      Lightning precision (default: 16-mixed)
     SALT_USE_WANDB                      Set to "1" to enable W&B logging (default: 1)
+    SLURM_NNODES                        Number of nodes (set by SLURM; default: 1)
     HF_IN1K_CACHE_DIR                   ImageNet-1K HuggingFace cache dir
     HF_TOKEN                            HuggingFace access token
     HF_DATASET_REVISION                 Optional dataset revision pin
@@ -81,6 +82,7 @@ data_dir = Path(
 data_dir.mkdir(parents=True, exist_ok=True)
 
 num_gpus = torch.cuda.device_count() or 1
+num_nodes = int(os.environ.get("SLURM_NNODES", 1))
 batch_size = int(os.environ.get("SALT_BATCH_SIZE", "256"))
 lr = float(os.environ.get("SALT_LR", "5e-4"))
 num_workers = int(os.environ.get("SALT_NUM_WORKERS", "16"))
@@ -91,6 +93,7 @@ print(
     {
         "cache_dir": str(data_dir),
         "num_gpus": num_gpus,
+        "num_nodes": num_nodes,
         "batch_size_per_device": batch_size,
         "lr": lr,
         "teacher_ckpt": os.environ.get("SALT_TEACHER_CKPT"),
@@ -227,9 +230,10 @@ trainer = pl.Trainer(
     ],
     precision=os.environ.get("SALT_PRECISION", "16-mixed"),
     logger=wandb_logger,
-    devices=num_gpus,
+    devices="auto",
+    num_nodes=num_nodes,
     accelerator="gpu",
-    strategy="ddp_find_unused_parameters_true" if num_gpus > 1 else "auto",
+    strategy="ddp_find_unused_parameters_true",
 )
 
 manager = spt.Manager(trainer=trainer, module=module, data=data, seed=seed)

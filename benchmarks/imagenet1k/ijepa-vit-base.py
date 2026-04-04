@@ -173,9 +173,6 @@ module = IJEPA(
 def ijepa_forward(self, batch, stage):
     output = IJEPA.forward(self, batch["image"])
     embedding = output.embedding.mean(dim=1)
-    if self.training:
-        embedding = embedding.detach()
-
     self.log(f"{stage}/loss", output.loss, on_step=True, on_epoch=True, sync_dist=True)
 
     return {
