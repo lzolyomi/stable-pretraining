@@ -18,6 +18,7 @@ def main():
     data_dir.mkdir(parents=True, exist_ok=True)
     num_gpus = torch.cuda.device_count() or 1
     num_nodes = int(os.environ.get("SLURM_NNODES", 1))
+    num_epochs = int(os.environ.get("IJEPA_EPOCHS", "300"))
     batch_size = 256
     scaled_lr = 5e-4 * (batch_size * num_gpus / 2048)
 
@@ -99,7 +100,7 @@ def main():
     }
 
     trainer = pl.Trainer(
-        max_epochs=300,
+        max_epochs=num_epochs,
         num_sanity_val_steps=0,
         callbacks=[
             spt.callbacks.TeacherStudentCallback(
