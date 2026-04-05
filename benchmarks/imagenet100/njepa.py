@@ -114,8 +114,7 @@ ema_start = float(os.environ.get("NJEPA_EMA_START", "0.996"))
 ema_end = float(os.environ.get("NJEPA_EMA_END", "1.0"))
 
 batch_size = int(os.environ.get("NJEPA_BATCH_SIZE", "256"))
-lr = float(os.environ.get("NJEPA_LR", "5e-4"))
-num_gpus = torch.cuda.device_count() or 1
+num_gpus = int(os.environ.get("SLURM_GPUS_ON_NODE", torch.cuda.device_count() or 1))
 num_nodes = int(os.environ.get("SLURM_NNODES", 1))
 
 num_workers = int(os.environ.get("NJEPA_NUM_WORKERS", "16"))
@@ -126,6 +125,9 @@ seed = int(os.environ.get("NJEPA_SEED", "42"))
 
 data_dir = Path(os.environ.get("HF_IN100_CACHE_DIR", "/nfs-gpu/users_home/levizolyomi/hf-in100"))
 data_dir.mkdir(parents=True, exist_ok=True)
+
+# calculate lr with 2048 effective batch size as reference (as in I-JEPA paper)
+lr = float(os.environ.get("NJEPA_LR", "5e-4")) * (batch_size * num_gpus * num_nodes / 2048)
 
 print(
     "NJEPA config:",

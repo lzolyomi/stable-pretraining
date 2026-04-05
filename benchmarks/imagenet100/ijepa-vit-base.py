@@ -16,11 +16,11 @@ def main():
     seed = int(os.environ.get("IJEPA_SEED", "42"))
     data_dir = Path(os.environ.get("HF_IN100_CACHE_DIR", "/nfs-gpu/users_home/levizolyomi/hf-in100"))
     data_dir.mkdir(parents=True, exist_ok=True)
-    num_gpus = torch.cuda.device_count() or 1
+    num_gpus = int(os.environ.get("SLURM_GPUS_ON_NODE", torch.cuda.device_count() or 1))
     num_nodes = int(os.environ.get("SLURM_NNODES", 1))
     num_epochs = int(os.environ.get("IJEPA_EPOCHS", "300"))
     batch_size = 256
-    scaled_lr = 5e-4 * (batch_size * num_gpus / 2048)
+    scaled_lr = 5e-4 * (batch_size * num_gpus * num_nodes / 2048)
 
     def ijepa_forward(self, batch, stage):
         output = IJEPA.forward(self, batch["image"])
@@ -99,6 +99,26 @@ def main():
         "interval": "epoch",
     }
 
+    wandb_logger = pl.pytorch.loggers.WandbLogger(
+        entity="tirex",
+        project="stable-pretraining",
+        name="ijepa-vitb-inet100",
+        log_model=False,
+    )
+    wandb_logger.log_hyperparams({
+        "encoder": "vit_base_patch16_224",
+        "predictor_embed_dim": 384,
+        "predictor_depth": 6,
+        "ema_start": 0.996,
+        "ema_end": 1.0,
+        "batch_size_per_device": batch_size,
+        "num_gpus": num_gpus,
+        "num_nodes": num_nodes,
+        "lr": scaled_lr,
+        "max_epochs": num_epochs,
+        "precision": "16-mixed",
+    })
+
     trainer = pl.Trainer(
         max_epochs=num_epochs,
         num_sanity_val_steps=0,
@@ -146,12 +166,7 @@ def main():
             ),
             pl.pytorch.callbacks.LearningRateMonitor(logging_interval="step"),
         ],
-        logger=pl.pytorch.loggers.WandbLogger(
-            entity="tirex",
-            project="stable-pretraining",
-            name="ijepa-vitb-inet100",
-            log_model=False,
-        ),
+        logger=wandb_logger,
         precision="16-mixed",
         devices="auto",
         num_nodes=num_nodes,
