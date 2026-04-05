@@ -129,6 +129,10 @@ data_dir.mkdir(parents=True, exist_ok=True)
 # calculate lr with 2048 effective batch size as reference (as in I-JEPA paper)
 lr = float(os.environ.get("NJEPA_LR", "5e-4")) * (batch_size * num_gpus * num_nodes / 2048)
 
+print("######### SCALED LR:", lr, "#########")
+print("######### SLURM GPUS:", num_gpus, "#########")
+print("######### SLURM NODES:", num_nodes, "#########")
+
 print(
     "NJEPA config:",
     {

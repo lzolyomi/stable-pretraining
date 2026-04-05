@@ -21,6 +21,9 @@ def main():
     num_epochs = int(os.environ.get("IJEPA_EPOCHS", "300"))
     batch_size = 256
     scaled_lr = 5e-4 * (batch_size * num_gpus * num_nodes / 2048)
+    print("######### SCALED LR:", scaled_lr, "#########")
+    print("######### SLURM GPUS:", num_gpus, "#########")
+    print("######### SLURM NODES:", num_nodes, "#########")
 
     def ijepa_forward(self, batch, stage):
         output = IJEPA.forward(self, batch["image"])
