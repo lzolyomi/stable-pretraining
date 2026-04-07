@@ -129,7 +129,7 @@ precision = os.environ.get("NJEPA_PRECISION", "16-mixed")
 ckpt_every = int(os.environ.get("NJEPA_CKPT_EVERY", "50"))
 seed = int(os.environ.get("NJEPA_SEED", "42"))
 
-data_dir = Path(os.environ.get("HF_IN1K_CACHE_DIR", "/nfs-gpu/users_home/levizolyomi/hf-in1k"))
+data_dir = Path(os.environ.get("HF_IN1K_CACHE_DIR", "/leonardo_work/AIFAC_F01_019/spt-data/hf-in1k"))
 data_dir.mkdir(parents=True, exist_ok=True)
 
 print(
@@ -270,6 +270,8 @@ _dt_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
 predefined_run_name = os.environ.get("NJEPA_RUN_NAME", "njepa")
 run_name = f"{predefined_run_name}-{short_name}-{_dt_suffix}"
 ckpt_dir = Path(__file__).parent / "checkpoints" / run_name
+
+print(f">>>>> CKPT_DIR: {ckpt_dir}")
 
 wandb_logger = False
 if os.environ.get("NJEPA_USE_WANDB", "1") == "1":

@@ -19,8 +19,9 @@ def main():
     num_gpus = int(os.environ.get("SLURM_GPUS_ON_NODE", torch.cuda.device_count() or 1))
     num_nodes = int(os.environ.get("SLURM_NNODES", 1))
     num_epochs = int(os.environ.get("IJEPA_EPOCHS", "300"))
-    batch_size = 256
-    scaled_lr = 5e-4 * (batch_size * num_gpus * num_nodes / 2048)
+    batch_size = int(os.environ.get("IJEPA_BATCH_SIZE", "256"))
+    base_lr = float(os.environ.get("IJEPA_BASE_LR", "5e-4"))
+    scaled_lr = base_lr * (batch_size * num_gpus * num_nodes / 2048)
     print("######### SCALED LR:", scaled_lr, "#########")
     print("######### SLURM GPUS:", num_gpus, "#########")
     print("######### SLURM NODES:", num_nodes, "#########")

@@ -147,6 +147,7 @@ multirun/
 ./data/
 examples/data/
 wandb/
+wandb-archive/
 
 *.ckpt
 *.pt
